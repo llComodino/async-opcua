@@ -39,8 +39,7 @@ regex = "^1"
 roxmltree = "^0.21"
 serde = { version = "^1", features = ["derive"] }
 serde_json = { version = "^1", features = ["arbitrary_precision"] }
-yaml_serde = "^0.10"
-shellexpand = { version = "3.1" }
+serde-saphyr = { git = "https://github.com/llComodino/serde-saphyr", branch = "feat/custom-value-formatter", features = ["properties-custom-fmt"] }
 struson = { version = "^0.6" }
 syn = { version = "^2", features = ["full"] }
 thiserror = "^2"

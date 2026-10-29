@@ -58,7 +58,7 @@ async-opcua-server = { path = ".", features = [
   "discovery-server-registration",
   "json",
 ] }
-yaml_serde = { workspace = true }
+serde-saphyr = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

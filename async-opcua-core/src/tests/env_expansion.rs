@@ -90,6 +90,7 @@ mod tests {
         assert_eq!(config.value, "default_value");
     }
 
+    // in POSIX Shell if both are empty/unset the output is ""
     #[test]
     fn test_fallback_is_not_expanded() {
         let mut fixture = EnvTestFixture::new();
@@ -97,7 +98,7 @@ mod tests {
         fixture.remove_var("VARIABLE");
         fixture.remove_var("FOO");
         let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
-        assert_eq!(config.value, "${FOO}");
+        assert_eq!(config.value, "");
     }
 
     #[test]
@@ -158,38 +159,6 @@ mod tests {
     }
 
     #[test]
-    fn test_env_expansion_for_boolean() {
-        let mut fixture = EnvTestFixture::new();
-        fixture.write_yaml("value: $BOOLEAN_ENV_VAR");
-        fixture.set_var("BOOLEAN_ENV_VAR", "true");
-        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
-        assert!(config.value);
-        fixture.set_var("BOOLEAN_ENV_VAR", "false");
-        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
-        assert!(!config.value);
-    }
-
-    // Only lowercase "true" and "false" are parsed as booleans
-    #[should_panic]
-    #[test]
-    fn test_env_expansion_for_boolean_should_fail() {
-        let mut fixture = EnvTestFixture::new();
-        fixture.write_yaml("value: $BOOLEAN_ENV_VAR_2");
-        fixture.set_var("BOOLEAN_ENV_VAR_2", "True");
-        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
-        assert!(config.value);
-        fixture.set_var("BOOLEAN_ENV_VAR_2", "TRUE");
-        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
-        assert!(config.value);
-        fixture.set_var("BOOLEAN_ENV_VAR_2", "False");
-        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
-        assert!(!config.value);
-        fixture.set_var("BOOLEAN_ENV_VAR_2", "FALSE");
-        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
-        assert!(!config.value);
-    }
-
-    #[test]
     fn test_env_expansion_for_integer() {
         let mut fixture = EnvTestFixture::new();
         fixture.write_yaml("value: $INTEGER_ENV_VAR");
@@ -226,11 +195,61 @@ mod tests {
         assert_eq!(config.value, f64::MAX);
     }
 
-    // The following tests are expected to panic because `shellexpand` does not support
-    // certain bash-like syntax for environment variable interpolation.
-    // The tests are here to document that behavior.
+    // By yaml standard 1.2.2, True and TRUE should be
+    // regarded as booleans unless explicitly quoted
+    // though we can infer the type via serde
+    #[test]
+    fn test_env_expansion_for_boolean() {
+        let mut fixture = EnvTestFixture::new();
+        fixture.write_yaml("value: \"$BOOLEAN_ENV_VAR\"");
 
+        // parse to string via serde inference
+        fixture.set_var("BOOLEAN_ENV_VAR", "True");
+        let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
+        // parse to bool via serde inference
+        assert_eq!(config.value, "True");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(config.value);
+
+        fixture.set_var("BOOLEAN_ENV_VAR", "TRUE");
+        let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
+        assert_eq!(config.value, "TRUE");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(config.value);
+
+        fixture.set_var("BOOLEAN_ENV_VAR", "False");
+        let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
+        assert_eq!(config.value, "False");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(!config.value);
+
+        fixture.set_var("BOOLEAN_ENV_VAR", "FALSE");
+        let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
+        assert_eq!(config.value, "FALSE");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(!config.value);
+    }
+
+    // YAML 1.1 spellings are not booleans with `strict_booleans`.
     #[should_panic]
+    #[test]
+    fn test_env_expansion_for_yaml_1_boolean_should_fail() {
+        let mut fixture = EnvTestFixture::new();
+        fixture.write_yaml("value: $BOOLEAN_ENV_VAR_2");
+        fixture.set_var("BOOLEAN_ENV_VAR_2", "yes");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(config.value);
+        fixture.set_var("BOOLEAN_ENV_VAR_2", "on");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(config.value);
+        fixture.set_var("BOOLEAN_ENV_VAR_2", "no");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(!config.value);
+        fixture.set_var("BOOLEAN_ENV_VAR_2", "off");
+        let config: DummyConfig<bool> = DummyConfig::<bool>::load(fixture.path()).unwrap();
+        assert!(!config.value);
+    }
+
     #[test]
     fn test_env_expansion_with_empty_var_and_default_fallback() {
         let mut fixture = EnvTestFixture::new();
@@ -240,23 +259,21 @@ mod tests {
         assert_eq!(config.value, "default_value");
     }
 
-    #[should_panic]
     #[test]
     fn test_env_expansion_with_default_if_unset() {
         let mut fixture = EnvTestFixture::new();
-        fixture.write_yaml("value: ${UNSET_ENV_VAR-default_value}");
-        fixture.remove_var("UNSET_ENV_VAR");
+        fixture.write_yaml("value: ${UNSET_ENV_VAR_2-default_value}");
+        fixture.remove_var("UNSET_ENV_VAR_2");
         let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
         assert_eq!(config.value, "default_value");
-        fixture.set_var("UNSET_ENV_VAR", "actual_value");
+        fixture.set_var("UNSET_ENV_VAR_2", "actual_value");
         let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
         assert_eq!(config.value, "actual_value");
-        fixture.set_var("UNSET_ENV_VAR", "");
+        fixture.set_var("UNSET_ENV_VAR_2", "");
         let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
         assert_eq!(config.value, "");
     }
 
-    #[should_panic]
     #[test]
     fn test_env_expansion_with_required_var() {
         let mut fixture = EnvTestFixture::new();
@@ -274,7 +291,6 @@ mod tests {
         assert_eq!(config.value, "present");
     }
 
-    #[should_panic]
     #[test]
     fn test_env_expansion_with_required_var_unset_only() {
         let mut fixture = EnvTestFixture::new();
@@ -287,33 +303,43 @@ mod tests {
         let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
         assert_eq!(config.value, "present");
         fixture.set_var("REQUIRED_UNSET_ENV_VAR", "");
-        let result: Result<DummyConfig<String>, crate::config::ConfigError> =
-            DummyConfig::<String>::load(fixture.path());
-        assert!(
-            result.is_err(),
-            "Should error if PLUS_IF_SET_ENV_VAR is empty"
-        );
+        let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
+        assert_eq!(config.value, "");
     }
 
-    #[should_panic]
+    #[test]
+    fn test_env_expansion_required_var_error_message_and_location() {
+        let mut fixture = EnvTestFixture::new();
+        fixture.write_yaml("other: 1\nvalue: ${REQUIRED_MSG_ENV_VAR:?must be set}\n");
+        fixture.remove_var("REQUIRED_MSG_ENV_VAR");
+        let Err(crate::config::ConfigError::YamlDeserialize(err)) =
+            DummyConfig::<String>::load::<DummyConfig<String>>(fixture.path())
+        else {
+            panic!("expected a deserialize error");
+        };
+        let message = err.to_string();
+        assert!(
+            message.contains("REQUIRED_MSG_ENV_VAR: must be set"),
+            "{message}"
+        );
+        assert_eq!(err.location().map(|l| l.line()), Some(2), "{message}");
+    }
+
     #[test]
     fn test_env_expansion_with_plus_replacement() {
         let mut fixture = EnvTestFixture::new();
         fixture.write_yaml("value: ${PLUS_ENV_VAR:+replacement_value}");
         fixture.remove_var("PLUS_ENV_VAR");
-        let result: Result<DummyConfig<String>, crate::config::ConfigError> =
-            DummyConfig::<String>::load(fixture.path());
-        assert!(result.is_err(), "Should error if PLUS_ENV_VAR is unset");
+        let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
+        assert_eq!(config.value, "");
         fixture.set_var("PLUS_ENV_VAR", "");
-        let result: Result<DummyConfig<String>, crate::config::ConfigError> =
-            DummyConfig::<String>::load(fixture.path());
-        assert!(result.is_err(), "Should error if PLUS_ENV_VAR is empty");
+        let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
+        assert_eq!(config.value, "");
         fixture.set_var("PLUS_ENV_VAR", "present");
         let config: DummyConfig<String> = DummyConfig::<String>::load(fixture.path()).unwrap();
         assert_eq!(config.value, "replacement_value");
     }
 
-    #[should_panic]
     #[test]
     fn test_env_expansion_with_plus_replacement_if_set() {
         let mut fixture = EnvTestFixture::new();

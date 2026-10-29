@@ -20,8 +20,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
-yaml_serde = { workspace = true }
-shellexpand = { workspace = true, optional = true }
+serde-saphyr = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
@@ -38,4 +37,4 @@ tempfile = { version = "^3" }
 workspace = true
 
 [features]
-env_expansion = ["dep:shellexpand"]
+env_expansion = []

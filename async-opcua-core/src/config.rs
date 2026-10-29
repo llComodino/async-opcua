@@ -10,7 +10,7 @@ use std::path::Path;
 use std::result::Result;
 
 use serde;
-use yaml_serde;
+use serde_saphyr;
 
 use opcua_types::{ApplicationDescription, ApplicationType, LocalizedText, UAString};
 
@@ -21,8 +21,10 @@ pub enum ConfigError {
     ConfigInvalid(Vec<String>),
     /// Reading or writing file failed.
     IO(std::io::Error),
-    /// Failed to serialize or deserialize config object.
-    Yaml(yaml_serde::Error),
+    /// Failed to serialize config object.
+    YamlSerialize(serde_saphyr::SerializeError),
+    /// Failed to deserialize config object.
+    YamlDeserialize(serde_saphyr::DeserializeError),
 }
 
 impl From<std::io::Error> for ConfigError {
@@ -31,10 +33,35 @@ impl From<std::io::Error> for ConfigError {
     }
 }
 
-impl From<yaml_serde::Error> for ConfigError {
-    fn from(value: yaml_serde::Error) -> Self {
-        Self::Yaml(value)
+impl From<serde_saphyr::SerializeError> for ConfigError {
+    fn from(value: serde_saphyr::SerializeError) -> Self {
+        Self::YamlSerialize(value)
     }
+}
+
+impl From<serde_saphyr::DeserializeError> for ConfigError {
+    fn from(value: serde_saphyr::DeserializeError) -> Self {
+        Self::YamlDeserialize(value)
+    }
+}
+
+#[cfg(feature = "env_expansion")]
+mod env_expansion;
+
+/// Options shared by every config load.
+fn load_options() -> serde_saphyr::Options {
+    #[allow(unused_mut)]
+    let mut options = serde_saphyr::options! {
+        duplicate_keys: serde_saphyr::DuplicateKeyPolicy::PassThrough,
+        strict_booleans: true,
+    };
+    #[cfg(feature = "env_expansion")]
+    {
+        options.property_syntax = serde_saphyr::PropertySyntax::Custom(
+            serde_saphyr::PropertyCustomFormatter::new(env_expansion::expand_env),
+        );
+    }
+    options
 }
 
 /// A trait that handles the loading / saving and validity of configuration information for a
@@ -45,14 +72,16 @@ pub trait Config: serde::Serialize {
         if let Err(e) = self.validate() {
             return Err(ConfigError::ConfigInvalid(e));
         }
-        let s = yaml_serde::to_string(&self)?;
+        let s = serde_saphyr::to_string(&self)?;
         let mut f = File::create(path)?;
         f.write_all(s.as_bytes())?;
         Ok(())
     }
 
     /// Load the configuration object from the given path.
-    #[cfg(feature = "env_expansion")]
+    ///
+    /// With the `env_expansion` feature, `$NAME` / `${NAME...}` references in values are
+    /// expanded from the environment first.
     fn load<A>(path: &Path) -> Result<A, ConfigError>
     where
         for<'de> A: Config + serde::Deserialize<'de>,
@@ -60,21 +89,7 @@ pub trait Config: serde::Serialize {
         let mut f = File::open(path)?;
         let mut s = String::new();
         f.read_to_string(&mut s)?;
-        let mut value: yaml_serde::Value = yaml_serde::from_str(&s)?;
-        expand_env_in_value(&mut value);
-        Ok(yaml_serde::from_value(value)?)
-    }
-
-    /// Load the configuration object from the given path.
-    #[cfg(not(feature = "env_expansion"))]
-    fn load<A>(path: &Path) -> Result<A, ConfigError>
-    where
-        for<'de> A: Config + serde::Deserialize<'de>,
-    {
-        let mut f = File::open(path)?;
-        let mut s = String::new();
-        f.read_to_string(&mut s)?;
-        Ok(yaml_serde::from_str(&s)?)
+        Ok(serde_saphyr::from_str_with_options(&s, load_options())?)
     }
 
     /// Validate the config struct, returning a list of validation errors if it fails.
@@ -108,38 +123,5 @@ pub trait Config: serde::Serialize {
             discovery_profile_uri: UAString::null(),
             discovery_urls: self.discovery_urls(),
         }
-    }
-}
-
-#[cfg(feature = "env_expansion")]
-fn expand_env_in_value(value: &mut yaml_serde::Value) {
-    use yaml_serde::Value;
-    match value {
-        Value::String(s) => {
-            *value = match shellexpand::env(s) {
-                Ok(expanded) => match expanded.as_ref() {
-                    "null" | "~" => Value::Null,
-                    expanded_str => expanded_str
-                        .parse::<bool>()
-                        .map(Value::Bool)
-                        .or_else(|_| expanded_str.parse::<i64>().map(|i| Value::Number(i.into())))
-                        .or_else(|_| expanded_str.parse::<u64>().map(|u| Value::Number(u.into())))
-                        .or_else(|_| expanded_str.parse::<f64>().map(|f| Value::Number(f.into())))
-                        .unwrap_or_else(|_| Value::String(expanded.to_string())),
-                },
-                Err(_) => Value::Null,
-            }
-        }
-        Value::Sequence(seq) => {
-            for v in seq {
-                expand_env_in_value(v);
-            }
-        }
-        Value::Mapping(map) => {
-            for (_k, v) in map.iter_mut() {
-                expand_env_in_value(v);
-            }
-        }
-        _ => (),
     }
 }
